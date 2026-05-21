@@ -1,0 +1,13 @@
+{
+  "model_version": "20260521_210035",
+  "model_type": "Pipeline(ColumnTransformer + XGBClassifier)",
+  "threshold": "0.17425063",
+  "metrics": {
+    "auc_roc": 0.9712332723228545,
+    "pr_auc": 0.8200755590681522,
+    "precision": 0.37155963302752293,
+    "recall": 0.8526315789473684,
+    "f1": 0.5175718849840255
+  },
+  "training_date": "2026-05-21T21:00:35.159590"
+}
