@@ -13,12 +13,17 @@
 4. [Step 3: Exploratory Data Analysis (EDA)](#4-step-3-eda)
 5. [Step 4: Data Cleaning](#5-step-4-data-cleaning)
 6. [Step 5: Feature Engineering](#6-step-5-feature-engineering)
+   - [Scalers: Types, When to Use, and How They Work](#scalers-types-when-to-use-and-how-they-work)
+   - [Feature Selection: Detailed Notes](#feature-selection-methods)
+   - [PCA: Dimensionality Reduction for High-Dimensional Data](#pca-dimensionality-reduction-for-high-dimensional-data)
 7. [Step 6: Data Splitting](#7-step-6-data-splitting)
+   - [Preprocessing After Splitting (Avoiding Data Leakage)](#preprocessing-after-splitting-avoiding-data-leakage)
 8. [Step 7: Model Selection](#8-step-7-model-selection)
 9. [Step 8: Model Training](#9-step-8-model-training)
 10. [Step 9: Model Evaluation (All Metrics)](#10-step-9-model-evaluation)
 11. [Step 10: Hyperparameter Tuning](#11-step-10-hyperparameter-tuning)
 12. [Step 11: Model Interpretation & Explainability](#12-step-11-model-interpretation)
+    - [Feature Importance: Why It Matters and How to Use It](#feature-importance-why-it-matters-and-how-to-use-it)
 13. [Step 12: Model Validation & Testing](#13-step-12-model-validation)
 14. [Step 13: Deployment](#14-step-13-deployment)
 15. [Step 14: Monitoring & Maintenance](#15-step-14-monitoring)
@@ -281,8 +286,168 @@ Transforming raw data into features that better represent the underlying pattern
 | **Square root** | Moderate skew | `np.sqrt(df['col'])` |
 | **Standardization** | Different scales, for linear models | `StandardScaler()` |
 | **Min-Max scaling** | Need 0-1 range | `MinMaxScaler()` |
+| **Robust scaling** | Outliers present | `RobustScaler()` |
 | **Binning** | Convert continuous to categorical | `pd.cut(df['age'], bins=[0,18,35,50,65,100])` |
 | **Polynomial** | Non-linear relationships | `PolynomialFeatures(degree=2)` |
+
+### Scalers: Types, When to Use, and How They Work
+
+Scaling is the process of bringing numerical features to a comparable range so that no single feature dominates the model just because of its magnitude.
+
+#### Why Scaling Matters
+
+- **Linear models** (Logistic Regression, SVM, Linear Regression) are directly affected by feature scale — a feature ranging 0-1000 will dominate one ranging 0-1
+- **Distance-based models** (KNN, K-Means, SVM with RBF kernel) compute distances between points — unscaled features distort distances
+- **Gradient-based models** (Neural Networks) converge faster with scaled inputs
+- **Tree-based models** (Random Forest, XGBoost, LightGBM) are **NOT affected** by scaling — they split on thresholds, not magnitudes
+
+#### Scaler Comparison
+
+| Scaler | Formula | Centers Data? | Handles Outliers? | Output Range | Best For |
+|--------|---------|:---:|:---:|:---:|----------|
+| **StandardScaler** | (x - mean) / std | Yes | No | ~(-3, +3) | Normally distributed features, linear models |
+| **MinMaxScaler** | (x - min) / (max - min) | No | No | [0, 1] | Neural networks, image pixel values |
+| **RobustScaler** | (x - median) / IQR | Yes | Yes | Varies | Data with outliers |
+| **MaxAbsScaler** | x / max(\|x\|) | No | No | [-1, 1] | Sparse data (preserves zeros) |
+| **PowerTransformer** | Box-Cox or Yeo-Johnson | Yes | Partially | ~(-3, +3) | Making data more Gaussian |
+| **QuantileTransformer** | Maps to uniform/normal | Yes | Yes | [0, 1] or normal | Non-linear, heavy outliers |
+| **Normalizer** | x / \|\|x\|\| (row-wise) | No | No | Unit norm | Text (TF-IDF), when direction matters |
+
+#### Detailed Breakdown of Each Scaler
+
+**1. StandardScaler (Z-score normalization)**
+
+```python
+from sklearn.preprocessing import StandardScaler
+
+# Formula: z = (x - mean) / std
+# After scaling: mean = 0, std = 1
+
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Features are approximately normally distributed, no extreme outliers
+- **Avoid when**: Heavy outliers (they distort mean and std)
+- **Used by**: Logistic Regression, SVM, PCA, Neural Networks
+
+**2. MinMaxScaler**
+
+```python
+from sklearn.preprocessing import MinMaxScaler
+
+# Formula: x_scaled = (x - min) / (max - min)
+# After scaling: all values in [0, 1]
+
+scaler = MinMaxScaler()  # default range (0, 1)
+# scaler = MinMaxScaler(feature_range=(-1, 1))  # custom range
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Need bounded range (0-1), neural networks, image data
+- **Avoid when**: Outliers exist (a single outlier compresses all other values)
+- **Problem**: If test data has values outside train min/max, they exceed [0,1]
+
+**3. RobustScaler**
+
+```python
+from sklearn.preprocessing import RobustScaler
+
+# Formula: x_scaled = (x - median) / IQR
+# IQR = Q3 - Q1 (interquartile range)
+# After scaling: median = 0, IQR = 1
+
+scaler = RobustScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Data has significant outliers (fraud amounts, income, prices)
+- **Why it works**: Median and IQR are not affected by extreme values (unlike mean/std)
+- **Trade-off**: Does not bound the output range — outliers still exist, just less influential
+
+**4. MaxAbsScaler**
+
+```python
+from sklearn.preprocessing import MaxAbsScaler
+
+# Formula: x_scaled = x / max(|x|)
+# After scaling: values in [-1, 1], zeros stay as zeros
+
+scaler = MaxAbsScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Sparse data (CSR matrices from text vectorization) — preserves sparsity
+- **Avoid when**: Features have very different ranges
+
+**5. PowerTransformer**
+
+```python
+from sklearn.preprocessing import PowerTransformer
+
+# Yeo-Johnson: works with positive and negative values
+# Box-Cox: works only with strictly positive values
+
+scaler = PowerTransformer(method='yeo-johnson')  # or 'box-cox'
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Features are heavily skewed and you want to make them more Gaussian
+- **How it works**: Applies a power transformation (like log, but automatically finds the best exponent)
+- **Bonus**: Also standardizes the output (mean=0, std=1)
+
+**6. QuantileTransformer**
+
+```python
+from sklearn.preprocessing import QuantileTransformer
+
+# Maps data to a uniform [0,1] or normal distribution
+scaler = QuantileTransformer(output_distribution='normal', n_quantiles=1000)
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+- **Use when**: Extreme outliers, non-linear distributions, nothing else works
+- **How it works**: Ranks all values, then maps ranks to the desired distribution
+- **Trade-off**: Destroys the original distance relationships between values (non-linear transform)
+
+#### Decision Framework: Which Scaler to Choose
+
+```
+Does your data have significant outliers?
+│
+├── YES
+│   ├── Need Gaussian-like output? → PowerTransformer (Yeo-Johnson)
+│   ├── Extreme outliers, nothing works? → QuantileTransformer
+│   └── Just need robust centering? → RobustScaler  (most common choice)
+│
+└── NO
+    ├── Need [0,1] range? → MinMaxScaler
+    ├── Sparse data? → MaxAbsScaler
+    ├── Approximately normal? → StandardScaler  (most common choice)
+    └── Need Gaussian output? → PowerTransformer
+```
+
+#### Which Models Need Scaling?
+
+| Model | Needs Scaling? | Why |
+|-------|:---:|------|
+| Logistic Regression | Yes | Coefficients are scale-dependent |
+| SVM | Yes | Distance-based, kernel sensitive to scale |
+| KNN | Yes | Distance-based |
+| K-Means | Yes | Distance-based |
+| Neural Networks | Yes | Gradient descent converges faster |
+| PCA | Yes | Variance-based, large-scale features dominate |
+| Linear/Ridge/Lasso Regression | Yes | Regularization penalizes large coefficients |
+| Random Forest | No | Threshold-based splits, scale-invariant |
+| XGBoost / LightGBM / CatBoost | No | Threshold-based splits, scale-invariant |
+| Decision Tree | No | Threshold-based splits |
+| Naive Bayes | No | Probability-based |
 
 ### Categorical Encoding
 
@@ -351,6 +516,357 @@ X_selected = selector.fit_transform(X, y)
 selected_features = X.columns[selector.get_support()].tolist()
 ```
 
+#### Feature Selection: Detailed Notes and When to Use What
+
+##### Why Feature Selection Matters
+
+- **Reduces overfitting** — fewer features means less noise for the model to memorize
+- **Improves speed** — fewer features = faster training and prediction
+- **Improves interpretability** — easier to explain a model with 10 features than 200
+- **Removes multicollinearity** — correlated features confuse linear models
+- **Handles curse of dimensionality** — with too many features relative to samples, models struggle
+
+##### The Three Types of Feature Selection
+
+**1. Filter Methods (Fast, Model-Independent)**
+
+Evaluate features independently of any model. Fast but may miss feature interactions.
+
+```python
+from sklearn.feature_selection import (
+    VarianceThreshold, SelectKBest,
+    mutual_info_classif, chi2, f_classif
+)
+
+# Remove near-zero variance features
+# (features that are almost constant — they add no information)
+var_selector = VarianceThreshold(threshold=0.01)
+X_filtered = var_selector.fit_transform(X_train)
+
+# Select top K features by statistical test
+# For classification:
+selector = SelectKBest(score_func=mutual_info_classif, k=20)
+# For regression:
+# selector = SelectKBest(score_func=f_regression, k=20)
+
+X_selected = selector.fit_transform(X_train, y_train)
+selected_mask = selector.get_support()
+selected_features = X_train.columns[selected_mask].tolist()
+
+# Correlation-based removal (drop one of highly correlated pairs)
+corr_matrix = X_train.corr().abs()
+upper_triangle = corr_matrix.where(
+    np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+)
+to_drop = [col for col in upper_triangle.columns
+           if any(upper_triangle[col] > 0.90)]
+X_train = X_train.drop(columns=to_drop)
+```
+
+**2. Wrapper Methods (Accurate, Slow)**
+
+Use a model to evaluate subsets of features. More accurate but computationally expensive.
+
+```python
+from sklearn.feature_selection import RFE, RFECV
+from sklearn.ensemble import RandomForestClassifier
+
+# Recursive Feature Elimination
+# Trains model → removes least important feature → repeats
+estimator = RandomForestClassifier(n_estimators=100, random_state=42)
+rfe = RFE(estimator, n_features_to_select=15, step=1)
+rfe.fit(X_train, y_train)
+
+selected_features = X_train.columns[rfe.support_].tolist()
+feature_ranking = pd.Series(rfe.ranking_, index=X_train.columns).sort_values()
+
+# RFECV — automatically finds optimal number of features using CV
+rfecv = RFECV(estimator, step=1, cv=5, scoring='roc_auc', min_features_to_select=5)
+rfecv.fit(X_train, y_train)
+print(f"Optimal number of features: {rfecv.n_features_}")
+```
+
+**3. Embedded Methods (Best of Both Worlds)**
+
+Feature selection happens during model training.
+
+```python
+from sklearn.linear_model import LassoCV
+from xgboost import XGBClassifier
+
+# Lasso (L1) — automatically zeros out unimportant features
+lasso = LassoCV(cv=5, random_state=42)
+lasso.fit(X_train, y_train)
+important_features = X_train.columns[lasso.coef_ != 0].tolist()
+print(f"Lasso selected {len(important_features)} features")
+
+# Tree-based feature importance
+model = XGBClassifier(n_estimators=200, random_state=42)
+model.fit(X_train, y_train)
+
+importance = pd.Series(
+    model.feature_importances_,
+    index=X_train.columns
+).sort_values(ascending=False)
+
+# Keep features with importance above a threshold
+threshold = 0.01  # 1% importance
+selected_features = importance[importance > threshold].index.tolist()
+```
+
+##### Decision Framework: Which Feature Selection Method?
+
+| Situation | Recommended Method | Why |
+|-----------|-------------------|-----|
+| Quick baseline, many features | Variance Threshold + Correlation filter | Fast, removes obvious noise |
+| Need best subset, have time | RFECV with cross-validation | Finds optimal count automatically |
+| Using linear model | Lasso (L1 regularization) | Built-in feature selection |
+| Using tree model | Feature importance + SHAP | Leverages model's own learning |
+| Very high dimensionality (1000+) | Mutual Information → then RFE | Filter first to reduce, then refine |
+| Need to explain to stakeholders | SHAP values | Shows direction and magnitude |
+
+##### Important Notes on Feature Selection
+
+1. **Always do feature selection on training data only** — selecting features using the full dataset is data leakage
+2. **Feature importance != causation** — a feature being important to the model does not mean it causes the outcome
+3. **Correlated features split importance** — if two features are correlated, the model may assign importance to one randomly; removing one often does not hurt performance
+4. **More features is not always better** — after a point, adding features adds noise faster than signal
+5. **Domain knowledge beats algorithms** — if you know a feature should not logically predict the target, remove it regardless of what the model says (it might be leakage)
+
+### PCA: Dimensionality Reduction for High-Dimensional Data
+
+#### What Is PCA?
+
+PCA (Principal Component Analysis) transforms your original features into a new set of uncorrelated features called **principal components**, ordered by how much variance they explain. It is used to reduce the number of dimensions while retaining as much information as possible.
+
+#### When to Use PCA
+
+| Situation | Use PCA? | Why |
+|-----------|:---:|------|
+| 100+ features, many correlated | Yes | Reduces redundancy, speeds up training |
+| Features from PCA-transformed data (V1-V28 in credit card dataset) | Already done | The V columns ARE PCA components |
+| Need to visualize high-dimensional data | Yes | Reduce to 2-3 components for plotting |
+| Linear model struggling with multicollinearity | Yes | PCA components are uncorrelated |
+| Tree-based model (XGBoost, RF) | Rarely | Trees handle high dimensions and correlations natively |
+| Need interpretable features | No | PCA components are not interpretable |
+| Small dataset, many features | Yes | Reduces overfitting risk |
+
+#### How PCA Works (Intuition)
+
+```
+Original Data: 50 features, many correlated
+         ↓
+Step 1: Standardize all features (REQUIRED — PCA is variance-based)
+         ↓
+Step 2: Compute covariance matrix (how features relate to each other)
+         ↓
+Step 3: Find eigenvectors (directions of maximum variance)
+         ↓
+Step 4: Rank by eigenvalue (how much variance each direction explains)
+         ↓
+Step 5: Keep top K components that explain enough variance (e.g., 95%)
+         ↓
+Result: K new features (components), uncorrelated, ordered by importance
+```
+
+Each principal component is a **linear combination** of the original features:
+
+```
+PC1 = 0.4*Feature_A + 0.3*Feature_B - 0.2*Feature_C + ...
+PC2 = -0.1*Feature_A + 0.5*Feature_B + 0.3*Feature_C + ...
+```
+
+#### PCA Code Example
+
+```python
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+# Step 1: MUST scale before PCA (PCA is sensitive to feature magnitudes)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Step 2: Fit PCA — keep enough components to explain 95% variance
+pca = PCA(n_components=0.95)  # keeps components until 95% variance explained
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+
+print(f"Original features: {X_train_scaled.shape[1]}")
+print(f"PCA components kept: {X_train_pca.shape[1]}")
+print(f"Variance explained: {pca.explained_variance_ratio_.sum():.4f}")
+
+# Step 3: Visualize how many components you need (Elbow/Scree plot)
+pca_full = PCA().fit(X_train_scaled)
+cumulative_variance = np.cumsum(pca_full.explained_variance_ratio_)
+
+plt.figure(figsize=(10, 5))
+plt.plot(range(1, len(cumulative_variance) + 1), cumulative_variance, 'bo-')
+plt.axhline(y=0.95, color='r', linestyle='--', label='95% threshold')
+plt.xlabel('Number of Components')
+plt.ylabel('Cumulative Explained Variance')
+plt.title('PCA - How Many Components Do You Need?')
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+#### Decoding PCA: Understanding What the Components Mean
+
+When you have a large number of columns (like 50-200 features) and PCA reduces them to 10-15 components, you lose direct interpretability. Here is how to decode what each component represents:
+
+**Method 1: Loadings Matrix (Which original features contribute to each component)**
+
+```python
+# The loadings tell you how much each original feature contributes to each PC
+loadings = pd.DataFrame(
+    pca.components_.T,  # Transpose: rows = original features, cols = components
+    columns=[f'PC{i+1}' for i in range(pca.n_components_)],
+    index=X_train.columns  # Original feature names
+)
+
+# For PC1: which original features have the highest weight?
+pc1_loadings = loadings['PC1'].abs().sort_values(ascending=False)
+print("Top features contributing to PC1:")
+print(pc1_loadings.head(10))
+
+# Visualize loadings for first 3 components
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+for i, ax in enumerate(axes):
+    loadings[f'PC{i+1}'].sort_values().plot(kind='barh', ax=ax)
+    ax.set_title(f'PC{i+1} Loadings')
+    ax.set_xlabel('Loading Weight')
+plt.tight_layout()
+plt.show()
+```
+
+**Method 2: Naming Components by Dominant Features**
+
+```python
+# Automatically label each component by its top contributing features
+for i in range(min(5, pca.n_components_)):
+    pc = loadings[f'PC{i+1}']
+    top_positive = pc.nlargest(3).index.tolist()
+    top_negative = pc.nsmallest(3).index.tolist()
+
+    print(f"\nPC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance):")
+    print(f"  Driven by (positive): {top_positive}")
+    print(f"  Driven by (negative): {top_negative}")
+
+# Example output:
+# PC1 (25.3% variance):
+#   Driven by (positive): ['total_spend', 'num_transactions', 'account_age']
+#   Driven by (negative): ['days_inactive', 'complaints', 'late_payments']
+# Interpretation: PC1 represents "customer engagement" — high = active, low = disengaged
+```
+
+**Method 3: Inverse Transform (Reconstruct Original Features)**
+
+```python
+# If you need to go back from PCA space to original feature space
+X_reconstructed = pca.inverse_transform(X_train_pca)
+X_reconstructed = scaler.inverse_transform(X_reconstructed)
+
+# This gives approximate original values (some info lost)
+# Useful for: understanding what a specific PCA prediction means in real terms
+
+# Reconstruction error tells you how much information was lost
+reconstruction_error = np.mean((X_train_scaled - pca.inverse_transform(X_train_pca))**2)
+print(f"Mean reconstruction error: {reconstruction_error:.6f}")
+```
+
+**Method 4: Biplot (Visualize Features and Samples Together)**
+
+```python
+def biplot(score, coeff, labels, pc_x=0, pc_y=1):
+    """
+    Biplot: shows both samples (dots) and feature directions (arrows)
+    in PCA space. Arrows pointing in similar directions = correlated features.
+    """
+    plt.figure(figsize=(12, 8))
+
+    # Plot samples
+    plt.scatter(score[:, pc_x], score[:, pc_y], alpha=0.3, s=10)
+
+    # Plot feature arrows
+    for i, label in enumerate(labels):
+        plt.arrow(0, 0, coeff[i, pc_x]*3, coeff[i, pc_y]*3,
+                  color='red', alpha=0.7, head_width=0.05)
+        plt.text(coeff[i, pc_x]*3.2, coeff[i, pc_y]*3.2,
+                 label, color='red', fontsize=8)
+
+    plt.xlabel(f'PC{pc_x+1}')
+    plt.ylabel(f'PC{pc_y+1}')
+    plt.title('PCA Biplot')
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+biplot(X_train_pca, pca.components_.T, X_train.columns)
+```
+
+#### PCA with Large Number of Columns: Practical Strategy
+
+When you have 100-500+ columns:
+
+```python
+# Strategy for very high-dimensional data
+
+# 1. First, remove obviously useless features
+#    - Zero/near-zero variance
+#    - >90% missing
+#    - Duplicate columns
+from sklearn.feature_selection import VarianceThreshold
+vt = VarianceThreshold(threshold=0.01)
+X_filtered = vt.fit_transform(X_train_scaled)
+print(f"After variance filter: {X_filtered.shape[1]} features remain")
+
+# 2. Apply PCA with variance threshold
+pca = PCA(n_components=0.95)
+X_pca = pca.fit_transform(X_filtered)
+print(f"After PCA (95% variance): {X_pca.shape[1]} components")
+
+# 3. Create a mapping document for stakeholders
+component_summary = []
+for i in range(pca.n_components_):
+    top_features = loadings[f'PC{i+1}'].abs().nlargest(5).index.tolist()
+    component_summary.append({
+        'Component': f'PC{i+1}',
+        'Variance Explained': f"{pca.explained_variance_ratio_[i]*100:.1f}%",
+        'Cumulative Variance': f"{sum(pca.explained_variance_ratio_[:i+1])*100:.1f}%",
+        'Top Features': ', '.join(top_features),
+        'Interpretation': ''  # Fill manually based on domain knowledge
+    })
+
+summary_df = pd.DataFrame(component_summary)
+print(summary_df.to_string())
+```
+
+#### PCA vs Feature Selection: When to Use Which?
+
+| Criteria | PCA | Feature Selection |
+|----------|-----|-------------------|
+| **Interpretability** | Low (components are combinations) | High (keeps original features) |
+| **Multicollinearity** | Eliminates completely | May remain if not filtered |
+| **Information loss** | Minimal (controlled by n_components) | Can lose important interactions |
+| **Speed** | Fast transform after fitting | Varies by method |
+| **Works with tree models** | Usually not needed | Yes, always useful |
+| **Works with linear models** | Excellent | Good |
+| **Handles 500+ features** | Excellent | Slower (especially wrappers) |
+| **Production deployment** | Need to save PCA object | Simpler (just column list) |
+
+**Rule of thumb**: Use PCA when you have many correlated features and are using linear/distance-based models. Use feature selection when interpretability matters or you are using tree-based models.
+
+#### Important Notes on PCA
+
+1. **Always scale before PCA** — PCA finds directions of maximum variance; unscaled features with large ranges will dominate
+2. **PCA components are uncorrelated** — this eliminates multicollinearity entirely
+3. **You cannot do PCA on categorical features** — use MCA (Multiple Correspondence Analysis) for categorical data, or encode first
+4. **PCA is unsupervised** — it does not use the target variable; it may discard variance that is actually predictive
+5. **For supervised dimensionality reduction**, consider LDA (Linear Discriminant Analysis) which uses class labels
+6. **The credit card dataset V1-V28 columns are already PCA-transformed** — the original features were transformed for privacy; you cannot decode them back to original features without the original PCA object
+7. **Fit PCA on training data only** — same leakage rules apply as with scalers
+
 ---
 
 ## 7. Step 6: Data Splitting
@@ -398,6 +914,179 @@ cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc')
 print(f"AUC: {scores.mean():.4f} ± {scores.std():.4f}")
 ```
+
+### Preprocessing After Splitting (Avoiding Data Leakage)
+
+#### What Is Data Leakage?
+
+Data leakage happens when information from the test set influences the training process. The model appears to perform well during development, but fails in production because it was "cheating" — it had access to knowledge it won't have when making real predictions on unseen data.
+
+The most common form of leakage is **preprocessing leakage**: fitting a scaler, encoder, or imputer on the full dataset (including test data) before splitting.
+
+#### Why This Matters
+
+When you fit a scaler on the full dataset, the scaler learns **global statistics** (mean, median, standard deviation, IQR) that include information from the test set. For example:
+
+- `StandardScaler` learns the mean and std of the entire dataset
+- `RobustScaler` learns the median and IQR of the entire dataset
+- `MinMaxScaler` learns the min and max of the entire dataset
+- `KNNImputer` uses test set neighbors to fill training set missing values
+
+These statistics then "leak" test set information into the training data transformation. The result:
+
+1. **Overly optimistic metrics** — Your test set evaluation is no longer unbiased because the model indirectly saw test data patterns during training
+2. **Poor generalization** — In production, you won't have future data to compute statistics from, so the model encounters a distribution it wasn't truly prepared for
+3. **False confidence** — You deploy a model thinking it has 95% AUC, but in reality it's 90%
+
+#### The Correct Order
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│   WRONG (Leakage):                                               │
+│   ─────────────────                                              │
+│   1. Load full dataset                                           │
+│   2. Scale/transform full dataset  ← scaler sees test data!     │
+│   3. Split into train/test                                       │
+│   4. Train model                                                 │
+│   5. Evaluate on test  ← metrics are biased                     │
+│                                                                   │
+│   CORRECT (No Leakage):                                          │
+│   ────────────────────                                           │
+│   1. Load full dataset                                           │
+│   2. Split into train/test FIRST                                 │
+│   3. Fit scaler on X_train ONLY                                  │
+│   4. Transform X_train with fitted scaler                        │
+│   5. Transform X_test with SAME fitted scaler (no re-fitting)   │
+│   6. Train model on transformed X_train                          │
+│   7. Evaluate on transformed X_test  ← metrics are unbiased     │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Code Example
+
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import RobustScaler, StandardScaler
+
+# Step 1: Split FIRST — before any preprocessing
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# Step 2: Fit scaler on training data ONLY
+scaler = RobustScaler()
+X_train['Amount'] = scaler.fit_transform(X_train[['Amount']])
+
+# Step 3: Transform test data using the SAME fitted scaler
+# .transform() — NOT .fit_transform()
+X_test['Amount'] = scaler.transform(X_test[['Amount']])
+
+# Step 4: Save the scaler for production use
+import joblib
+joblib.dump(scaler, 'artifacts/amount_scaler.pkl')
+
+# At inference time (production):
+# loaded_scaler = joblib.load('artifacts/amount_scaler.pkl')
+# new_data['Amount'] = loaded_scaler.transform(new_data[['Amount']])
+```
+
+#### The Key Distinction: fit_transform vs transform
+
+| Method | What It Does | When to Use |
+|--------|-------------|-------------|
+| `scaler.fit(X_train)` | Learns statistics (mean, std, etc.) from X_train | Once, on training data only |
+| `scaler.transform(X)` | Applies the learned transformation | On any data (train, test, production) |
+| `scaler.fit_transform(X_train)` | Shortcut: fit + transform in one call | Only on training data |
+
+**Rule**: `fit_transform()` on train, `transform()` on everything else.
+
+#### What Operations Cause Leakage If Done Before Splitting?
+
+| Operation | Leaks Because |
+|-----------|--------------|
+| **Scaling** (StandardScaler, MinMaxScaler, RobustScaler) | Learns global mean/std/min/max/median/IQR |
+| **Imputation** (mean, median, KNN) | Fill values come from test data too |
+| **Encoding** (Target encoding) | Target statistics include test labels |
+| **Feature selection** (based on correlation with target) | Selection influenced by test set patterns |
+| **Oversampling/SMOTE** | Synthetic samples may be near test points |
+| **PCA / Dimensionality reduction** | Components learned from full data |
+| **Binning** (based on quantiles) | Bin edges influenced by test data |
+
+#### What Is Safe to Do Before Splitting?
+
+| Operation | Why It's Safe |
+|-----------|--------------|
+| **Dropping columns** (e.g., ID, irrelevant) | No statistics learned |
+| **Fixing data types** (string → datetime) | No statistics learned |
+| **Removing duplicates** | No statistics learned |
+| **Renaming columns** | No statistics learned |
+| **Filtering rows** (removing known bad data) | No statistics learned |
+| **One-hot encoding** (if categories are fixed/known) | No statistics from data distribution |
+
+#### Using sklearn Pipeline to Prevent Leakage Automatically
+
+The safest approach is to use `sklearn.pipeline.Pipeline`, which guarantees that all preprocessing steps are fit only on training data during cross-validation and model fitting:
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import RobustScaler
+from sklearn.compose import ColumnTransformer
+from xgboost import XGBClassifier
+
+# Define preprocessing
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('scale_amount', RobustScaler(), ['Amount']),
+    ],
+    remainder='passthrough'  # Leave other columns unchanged
+)
+
+# Create pipeline: preprocessing + model
+pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', XGBClassifier(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=6,
+        random_state=42
+    ))
+])
+
+# Now fit and predict — no leakage possible
+pipeline.fit(X_train, y_train)
+y_pred = pipeline.predict(X_test)
+y_probs = pipeline.predict_proba(X_test)[:, 1]
+
+# The pipeline automatically:
+# - Fits the scaler on X_train only
+# - Transforms X_train for model training
+# - Transforms X_test using train-fitted scaler for prediction
+```
+
+#### Real-World Impact of Leakage
+
+| Dataset Size | Typical Metric Inflation from Leakage |
+|-------------|--------------------------------------|
+| Small (<10K rows) | 2-5% AUC overestimate |
+| Medium (10K-100K) | 1-3% AUC overestimate |
+| Large (>100K) | 0.5-1% AUC overestimate |
+
+The smaller your dataset, the worse the leakage effect — because the test set has more influence on the global statistics.
+
+#### Checklist: Am I Leaking?
+
+Ask yourself these questions for every preprocessing step:
+
+- [ ] Does this step compute any statistic from the data (mean, std, min, max, frequency)?
+- [ ] If yes, am I computing it from training data only?
+- [ ] Am I applying SMOTE/oversampling only to training data?
+- [ ] Am I doing feature selection only on training data?
+- [ ] Would this feature be available at prediction time in production?
+- [ ] Am I using a Pipeline to enforce the correct order automatically?
+
+If any answer is wrong, you have leakage.
 
 ---
 
@@ -715,6 +1404,334 @@ shap.force_plot(explainer.expected_value, shap_values[0], X_test.iloc[0])
 # Dependence: how does one feature affect predictions?
 shap.dependence_plot('tenure_months', shap_values, X_test)
 ```
+
+### Feature Importance: Why It Matters and How to Use It
+
+#### Why Feature Importance Is Critical
+
+Feature importance is not just a "nice to have" — it is one of the most valuable outputs of your entire modeling process. Here is why:
+
+| Reason | Explanation |
+|--------|-------------|
+| **Validates your model** | If the top features make domain sense, the model is learning real patterns — not noise |
+| **Detects data leakage** | If a feature is suspiciously dominant (>50% importance), it might be leaking the target |
+| **Guides feature engineering** | Shows which features to invest more effort in (interactions, transformations) |
+| **Enables feature pruning** | Remove low-importance features to simplify the model without losing performance |
+| **Builds stakeholder trust** | Business users trust a model more when they understand what drives predictions |
+| **Debugging poor performance** | If important features are unexpected, something is wrong with your data or pipeline |
+| **Informs data collection** | Tells you which data sources are most valuable to maintain and improve |
+| **Regulatory compliance** | Many industries require you to explain what factors influence decisions |
+
+#### Types of Feature Importance
+
+**1. Built-in (Model-Specific) Feature Importance**
+
+Tree-based models compute importance during training. Two common methods:
+
+```python
+from xgboost import XGBClassifier
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Train model
+model = XGBClassifier(n_estimators=300, random_state=42)
+model.fit(X_train, y_train)
+
+# Get feature importance
+importance = pd.Series(
+    model.feature_importances_,
+    index=X_train.columns
+).sort_values(ascending=False)
+
+# Plot top 20 features
+plt.figure(figsize=(10, 8))
+importance.head(20).plot(kind='barh')
+plt.title('XGBoost Feature Importance (Top 20)')
+plt.xlabel('Importance Score')
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.show()
+
+# Print importance values
+print("Top 10 Most Important Features:")
+print(importance.head(10))
+print(f"\nBottom 10 (candidates for removal):")
+print(importance.tail(10))
+```
+
+**XGBoost importance types:**
+
+```python
+from xgboost import plot_importance
+
+# 'weight' — number of times a feature is used to split (default)
+# 'gain' — average improvement in loss when the feature is used (RECOMMENDED)
+# 'cover' — average number of samples affected by splits on this feature
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 8))
+
+plot_importance(model, ax=axes[0], importance_type='weight', max_num_features=15)
+axes[0].set_title('Importance by Weight (split count)')
+
+plot_importance(model, ax=axes[1], importance_type='gain', max_num_features=15)
+axes[1].set_title('Importance by Gain (BEST)')
+
+plot_importance(model, ax=axes[2], importance_type='cover', max_num_features=15)
+axes[2].set_title('Importance by Cover (sample count)')
+
+plt.tight_layout()
+plt.show()
+```
+
+| Importance Type | What It Measures | Best For |
+|----------------|-----------------|----------|
+| **Weight** | How many times a feature is used in splits | Quick overview |
+| **Gain** | Average loss reduction when feature is used | Best overall measure |
+| **Cover** | Average number of samples in splits using this feature | Understanding reach |
+
+**2. Permutation Importance (Model-Agnostic)**
+
+Works with ANY model. Measures how much performance drops when a feature's values are randomly shuffled.
+
+```python
+from sklearn.inspection import permutation_importance
+
+# Calculate permutation importance on TEST set (not train!)
+perm_importance = permutation_importance(
+    model, X_test, y_test,
+    n_repeats=10,           # Shuffle 10 times for stability
+    random_state=42,
+    scoring='roc_auc'       # Use your primary metric
+)
+
+# Create sorted dataframe
+perm_df = pd.DataFrame({
+    'Feature': X_test.columns,
+    'Importance Mean': perm_importance.importances_mean,
+    'Importance Std': perm_importance.importances_std
+}).sort_values('Importance Mean', ascending=False)
+
+print("Permutation Importance (Top 15):")
+print(perm_df.head(15).to_string(index=False))
+
+# Plot with error bars
+plt.figure(figsize=(10, 8))
+top_n = 20
+plt.barh(
+    range(top_n),
+    perm_df['Importance Mean'].head(top_n),
+    xerr=perm_df['Importance Std'].head(top_n),
+    align='center'
+)
+plt.yticks(range(top_n), perm_df['Feature'].head(top_n))
+plt.xlabel('Mean Importance (AUC drop when shuffled)')
+plt.title('Permutation Importance (Top 20)')
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.show()
+```
+
+**Why permutation importance is better than built-in importance:**
+
+| Aspect | Built-in (Gain/Weight) | Permutation Importance |
+|--------|----------------------|----------------------|
+| Works with any model | No (tree models only) | Yes |
+| Affected by correlated features | Yes (splits importance) | Yes (but less so) |
+| Computed on test data | No (uses training splits) | Yes (unbiased) |
+| Accounts for feature interactions | Partially | Yes |
+| Speed | Instant (already computed) | Slower (re-evaluates model) |
+
+**3. SHAP Feature Importance (Gold Standard)**
+
+SHAP gives you both global importance AND the direction of effect (positive/negative).
+
+```python
+import shap
+
+# For tree models (fast)
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_test)
+
+# Global importance: mean absolute SHAP value per feature
+shap.summary_plot(shap_values, X_test, plot_type='bar')
+
+# Detailed: shows direction of effect (red = high value, blue = low value)
+shap.summary_plot(shap_values, X_test)
+
+# Get numerical importance values
+shap_importance = pd.DataFrame({
+    'Feature': X_test.columns,
+    'Mean |SHAP|': np.abs(shap_values).mean(axis=0)
+}).sort_values('Mean |SHAP|', ascending=False)
+
+print("SHAP Feature Importance:")
+print(shap_importance.head(15).to_string(index=False))
+```
+
+**Why SHAP is the gold standard:**
+
+- Shows **direction**: "Higher V14 values → more likely fraud" (not just "V14 is important")
+- Shows **magnitude per prediction**: Explains individual decisions, not just averages
+- **Mathematically grounded**: Based on Shapley values from game theory — fair attribution
+- **Consistent**: If a feature contributes more to a prediction, it always gets a higher SHAP value
+- Works with **any model** (TreeExplainer for trees, KernelExplainer for others)
+
+#### Comparing All Three Methods Side by Side
+
+```python
+# Create a comparison dataframe
+comparison = pd.DataFrame({
+    'Feature': X_test.columns,
+    'Built-in (Gain)': model.feature_importances_,
+    'Permutation': perm_importance.importances_mean,
+    'SHAP': np.abs(shap_values).mean(axis=0)
+})
+
+# Rank each method
+for col in ['Built-in (Gain)', 'Permutation', 'SHAP']:
+    comparison[f'{col}_Rank'] = comparison[col].rank(ascending=False).astype(int)
+
+# Sort by SHAP (most reliable)
+comparison = comparison.sort_values('SHAP', ascending=False)
+
+print("Feature Importance Comparison (Top 15):")
+print(comparison[['Feature', 'Built-in (Gain)_Rank', 'Permutation_Rank', 'SHAP_Rank']].head(15).to_string(index=False))
+
+# If rankings disagree significantly, investigate why:
+# - Correlated features split importance differently across methods
+# - Built-in importance can be biased toward high-cardinality features
+# - Permutation importance can underestimate correlated features
+```
+
+#### How to Interpret Feature Importance Results
+
+**Scenario 1: Top feature has >50% importance**
+
+```
+Red flag! Possible data leakage.
+Ask: "Would this feature be available at prediction time?"
+Ask: "Is this feature derived from the target?"
+Example: 'days_since_churn' being top feature for churn prediction = LEAKAGE
+```
+
+**Scenario 2: Many features have near-zero importance**
+
+```
+These features are noise. Remove them:
+- Speeds up training and prediction
+- Reduces overfitting
+- Simplifies the model
+
+threshold = 0.005  # Features below 0.5% importance
+low_importance = importance[importance < threshold].index.tolist()
+X_train_reduced = X_train.drop(columns=low_importance)
+```
+
+**Scenario 3: Importance rankings differ between methods**
+
+```
+This usually means features are correlated.
+Example: Feature A and Feature B are 0.9 correlated.
+- Built-in importance: splits between them randomly
+- Permutation: shuffling one doesn't hurt much (the other compensates)
+- SHAP: distributes fairly between correlated features
+
+Solution: Check correlation, consider dropping one of the pair.
+```
+
+**Scenario 4: A feature you expected to be important is not**
+
+```
+Possible reasons:
+1. The feature has low variance (almost constant)
+2. The feature is redundant (another feature captures the same info)
+3. The relationship is non-linear and the model can't capture it
+4. The feature needs transformation (log, binning, interaction)
+5. There's a data quality issue (too many nulls, wrong encoding)
+```
+
+#### Feature Importance for Linear Models
+
+For linear models, coefficients serve as feature importance — but only after scaling:
+
+```python
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+# MUST scale first — otherwise coefficients are not comparable
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+
+# Train logistic regression
+lr = LogisticRegression(max_iter=1000, random_state=42)
+lr.fit(X_train_scaled, y_train)
+
+# Coefficients = feature importance (after scaling)
+coef_importance = pd.Series(
+    np.abs(lr.coef_[0]),
+    index=X_train.columns
+).sort_values(ascending=False)
+
+# Positive coefficient = increases probability of positive class
+# Negative coefficient = decreases probability of positive class
+coef_direction = pd.Series(
+    lr.coef_[0],
+    index=X_train.columns
+).sort_values()
+
+print("Logistic Regression Feature Importance:")
+print(coef_importance.head(10))
+
+print("\nFeature Direction (positive = increases fraud probability):")
+print(coef_direction.tail(5))  # Top positive
+print(coef_direction.head(5))  # Top negative
+```
+
+#### Practical Workflow: Feature Importance After Training
+
+```python
+# Complete workflow: train → importance → prune → retrain
+
+# 1. Train initial model with all features
+model = XGBClassifier(n_estimators=300, learning_rate=0.05, random_state=42)
+model.fit(X_train, y_train)
+
+# 2. Get importance
+importance = pd.Series(model.feature_importances_, index=X_train.columns)
+
+# 3. Identify features to remove (below 1% importance)
+low_importance_features = importance[importance < 0.01].index.tolist()
+print(f"Features to remove ({len(low_importance_features)}): {low_importance_features}")
+
+# 4. Retrain without low-importance features
+X_train_reduced = X_train.drop(columns=low_importance_features)
+X_test_reduced = X_test.drop(columns=low_importance_features)
+
+model_reduced = XGBClassifier(n_estimators=300, learning_rate=0.05, random_state=42)
+model_reduced.fit(X_train_reduced, y_train)
+
+# 5. Compare performance
+from sklearn.metrics import roc_auc_score
+auc_full = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+auc_reduced = roc_auc_score(y_test, model_reduced.predict_proba(X_test_reduced)[:, 1])
+
+print(f"\nFull model ({X_train.shape[1]} features): AUC = {auc_full:.4f}")
+print(f"Reduced model ({X_train_reduced.shape[1]} features): AUC = {auc_reduced:.4f}")
+print(f"Performance change: {auc_reduced - auc_full:+.4f}")
+
+# If AUC barely changes (< 0.005 drop), keep the simpler model!
+```
+
+#### Key Takeaways on Feature Importance
+
+1. **Always check feature importance after training** — it is your primary debugging and validation tool
+2. **Use SHAP for final analysis** — it is the most reliable and informative method
+3. **Use permutation importance on the test set** — built-in importance can be misleading for correlated features
+4. **Suspicious top features = investigate immediately** — could be leakage
+5. **Low-importance features can usually be removed** — simpler models generalize better
+6. **Feature importance informs your next iteration** — engineer more features from the important ones, drop the useless ones
+7. **Compare multiple methods** — if they agree, you can be confident; if they disagree, dig deeper
+8. **Domain knowledge is the final judge** — if the model says "customer_id" is important, something is wrong regardless of what the numbers say
 
 ---
 

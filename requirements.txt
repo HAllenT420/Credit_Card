@@ -40,3 +40,4 @@ s3fs
 pyodbc
 xgboost
 lightgbm
+shap
